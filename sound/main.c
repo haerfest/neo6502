@@ -192,7 +192,7 @@ const uint16_t DURATIONS[] = {
 const uint SOUND_PIN = 20;
 
 // The default PWM wrap.
-const uint WRAP = 65536;
+const uint WRAP = 65535;
 
 
 int main() {
