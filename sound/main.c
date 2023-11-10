@@ -15,6 +15,12 @@
 #include "pico/stdlib.h"
 
 
+// On the Neo6502 the audio path is connected to GPIO20.
+const uint SOUND_PIN = 20;
+
+// The default PWM wrap.
+const uint WRAP = 65535;
+
 // Each note's frequency in Hz.
 const uint16_t FREQUENCIES[] = {
   988, 0, 0, 784, 659, 494, 392, 330, 165, 0, 330, 0, 165, 247, 330, 392, 165,
@@ -188,17 +194,11 @@ const uint16_t DURATIONS[] = {
   17, 3, 120, 11, 14, 17, 6, 66, 8, 51, 6, 71, 249, 71
 };
 
-// On the Neo6502 the audio path is connected to GPIO20.
-const uint SOUND_PIN = 20;
-
-// The default PWM wrap.
-const uint WRAP = 65535;
+// Ensure we have a duration for every note.
+static_assert(count_of(FREQUENCIES) == count_of(DURATIONS), "FREQUENCIES/DURATIONS mismatch");
 
 
 int main() {
-  // Ensure we have a duration for every note.
-  assert(count_of(FREQUENCIES) == count_of(DURATIONS));
-
   // We need to know the system frequency to calculate the right clock divider
   // for each note's frequency.
   clocks_init();
