@@ -1,0 +1,116 @@
+.program clk
+.side_set 1
+
+  ;
+  ; We have space for 32 instructions. With a 6502 running at 2 MHz
+  ; each period is 500 ns, for 250 ns per half-period (PHI2 low/high).
+  ;
+  ; With a 100 MHz PIO clock, we can fit 25 instructions into each PHI2
+  ; half-period, each instruction taking 10 ns excluding delays.
+  ;
+  ; The side pin is used to generate the 2 MHz clock.
+  ;
+  ; Default shift direction for IN and OUT is to shift >> right >>.
+  ;
+  ; Note the 74LVC245APW enable time of max 8.5 ns at 3.3V, or 1 cycle,
+  ; which we must honour.
+  ;
+  ; Upon a read request the Arm is given 190 ns to respond.
+  ;
+  ; Lnn and Hnn indicate where in the PHI2 L[ow] and H[igh] cycles we
+  ; are, for <nn> in cycle # 00..24.
+  ;
+
+  ;
+  ; L00: Starting up.
+  ;
+  set pindirs, 0b111            side 0 [9]          ; /OE1+/OE2+/OE3 writable
+
+.wrap_target
+
+  ;
+  ; L10: Assume we'll be read from.
+  ;
+  set x, 1                      side 0              ; set R/W flag (1=R, 0=W)
+
+  ;
+  ; L11: Prepare for reading address A0-A15 (4).
+  ;
+  mov osr, null                 side 0              ; set OSR to 0x00000000
+  out pindirs, 8                side 0              ; set GPIO0-7 to inputs
+  set pins, 0b011               side 0 [1]          ; enable /OE1 for A0-A7
+
+  ;
+  ; L15: Address now stable, read A0-A15 into ISR (4).
+  ;
+  in pins, 8                    side 0              ; read A0-A7
+  set pins, 0b101               side 0 [1]          ; enable /OE2 for A8-A15
+  in pins, 8                    side 0              ; read A8-A15
+
+  ;
+  ; L19: Save A0-A15 in Y and check R/W pin (2).
+  ;
+  mov y, isr                    side 0              ; save A0-A15 in Y
+  jmp pin, reading_from_us      side 0              ; check R/W line
+
+writing_to_us:
+
+  ;
+  ; L21: Prepare for being written to (4).
+  ;
+  set x, 0                      side 0              ; set R/W to writing
+  set pins, 0b110               side 0 [2]          ; enable /OE3 for D0-D7
+
+  ;
+  ; H00: Insert A0-A15 into ISR and wait (14).
+  ;
+  in y, 16                      side 1 [13]         ; insert A0-A15 in ISR
+
+  ;
+  ; H14: Earliest moment that D0-D7 contains byte to write (1).
+  ;
+  in pins, 8                    side 1              ; read D0-D7
+
+  ;
+  ; H15: Auto-push to RX FIFO (1).
+  ;
+  in x, 1                       side 1              ; include write-bit, push
+
+  ;
+  ; H16: Waste remainder of PHI2-high period (9).
+  ;
+  jmp L00                       side 1 [8]          ; move PHI2 low
+
+reading_from_us:
+
+  ;
+  ; L21: Auto-push read request to RX FIFO (2).
+  ;
+  in null, 8                    side 0              ; insert dummy byte in ISR
+  in x, 1                       side 0              ; include read-bit, push
+
+  ;
+  ; L23: Set GPIO0-7 to outputs and enable /OE3 (2).
+  ;
+  mov osr, ~ null               side 0              ; set OSR to 0x11111111
+  out pindirs, 8                side 0              ; set GPIO0-7 to outputs
+
+  ;
+  ; H00: Wait to give Arm more time (17).
+  ;
+  set pins, 0b110               side 1              ; enable /OE3 for D0-D7
+  nop                           side 1 [15]         ; wait
+
+  ;
+  ; H17: Read Arm's response and output D0-D7, then wait 60 ns (8).
+  ;
+  pull block                    side 1              ; fetch from FIFO TX
+  out pins, 8                   side 1 [6]          ; write D0-D7, wait 60 ns
+
+  ;
+  ; L00: Time to move PHI2 down and wrap to L11.
+  ;
+L00:
+  nop                           side 0 [9]          ; waste 10 cycles
+
+.wrap
