@@ -5,7 +5,6 @@
  */
 
 
-#include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "pico/stdlib.h"
