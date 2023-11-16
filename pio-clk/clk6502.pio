@@ -9,8 +9,6 @@
   ;
   ; The side pin is used to generate the 2 MHz clock.
   ;
-  ; Default shift direction for IN and OUT is to shift >> right >>.
-  ;
   ; Note the 74LVC245APW enable time of max 8.5 ns at 3.3V, or ~1 cycle,
   ; which we must honour.
   ;
@@ -20,24 +18,19 @@
   ; are, for <nn> in cycle # 00..24.
   ;
 
-  ;
-  ; L00: Starting up (10 cycles).
-  ;
-  set pindirs, 0b111            side 0 [9]          ; /OE1+/OE2+/OE3 writable
-
 .wrap_target
 
   ;
-  ; L10: Assume we'll be read from (1 cycle).
+  ; L00: Assume we'll be read from (1 cycle).
   ;
   set x, 1                      side 0              ; set R/W flag (1=R, 0=W)
 
   ;
-  ; L11: Prepare for reading address A0-A15 (4 cycles).
+  ; L01: Prepare for reading address A0-A15 (14 cycles).
   ;
   mov osr, null                 side 0              ; set OSR to 0x00000000
   out pindirs, 8                side 0              ; set GPIO0-7 to inputs
-  set pins, 0b011               side 0 [1]          ; enable /OE1 for A0-A7
+  set pins, 0b011               side 0 [11]         ; enable /OE1 for A0-A7
 
   ;
   ; L15: Address now stable, read A0-A15 into ISR (4 cycles).
@@ -113,3 +106,60 @@ L00:
   nop                           side 0 [9]          ; waste 10 cycles
 
 .wrap
+
+% c-sdk {
+
+static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
+  // Connect all relevant GPIO pins to the statemachine.
+  const uint pins[] = {
+    // D0-D7, A0-A7, A8-A15:
+    0, 1, 2, 3, 4, 5, 6, 7,
+    // /OE1 + /OE2 + /OE3:
+    8, 9, 10,
+    // R/W:
+    11,
+    // PHI2:
+    21
+  };
+  for (uint i = 0; i < count_of(pins); i++) {
+    pio_gpio_init(pio, pins[i]);
+  }
+
+  // /OE1 to /OE3 are always outputs.
+  pio_sm_set_consecutive_pindirs(pio, sm, 8, 3, true);
+  // R/W is always an input.
+  pio_sm_set_consecutive_pindirs(pio, sm, 11, 1, false);
+  // PHI2 is always an output.
+  pio_sm_set_consecutive_pindirs(pio, sm, 21, 1, true);
+
+  pio_sm_config c = clk6502_program_get_default_config(offset);
+
+  // GPIO0-7 (D0-D7, A0-A15) are bidrectional pins.
+  sm_config_set_in_pins(&c, 0);
+  sm_config_set_out_pins(&c, 0, 8);
+
+  // GPIO8-10 are set pins (/OE1 to /OE3).
+  sm_config_set_set_pins(&c, 8, 3);
+
+  // GPIO11 (R/W) is used to JMP on.
+  sm_config_set_jmp_pin(&c, 11);
+
+  // GPIO21 (PHI2) is the sideset pin.
+  sm_config_set_sideset_pins(&c, 21);
+
+  // Auto-push A0-A15 + D0-D7 + R/W to the RX FIFO, shifting left.
+  sm_config_set_in_shift(&c, false, true, 16 + 8 + 1);
+
+  // Manual pull D0-D7 from the TX FIFO, shifting left.
+  sm_config_set_out_shift(&c, false, false, 8);
+  
+  // Need to run the statemachine at 100 MHz.
+  const float div = clock_get_hz(clk_sys) / 100000000;
+  sm_config_set_clkdiv(&c, div);
+
+
+  pio_sm_init(pio, sm, offset, &c);
+  pio_sm_set_enabled(pio, sm, true);
+}
+
+%}
