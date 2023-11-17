@@ -23,8 +23,8 @@ int main() {
   clk6502_program_init(pio, sm, offset);
 
   // Take the 6502 out of reset after at least two clock ticks
-  // or 1 us.
-  sleep_us(1);
+  // or 1 us.  Let's wait a little longer.
+  sleep_us(5);
   gpio_put(PIN_RESB, 1);
 
   while (true) {

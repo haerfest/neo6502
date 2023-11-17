@@ -129,7 +129,7 @@ reading_from_us:
 
 
 static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
-  // Connect all relevant GPIO pins to the statemachine.
+  // Connect all relevant GPIO pins.
   const uint pins[] = {
     0, 1, 2, 3, 4, 5, 6, 7,  // D0-D7, A0-A7, A8-A15
     PIN_OE1, PIN_OE2, PIN_OE3,
@@ -141,14 +141,24 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
     pio_gpio_init(pio, pins[i]);
   }
 
+  // The NMIB, IRQB and RESB pins are always outputs.
+  gpio_set_dir(PIN_NMIB, GPIO_OUT);
+  gpio_set_dir(PIN_IRQB, GPIO_OUT);
+  gpio_set_dir(PIN_RESB, GPIO_OUT);
+
+  // Do not assert /IRQ nor /NMI.
+  gpio_put(PIN_NMIB, 1);
+  gpio_put(PIN_IRQB, 1);
+
+  // Assert /RESET, let the main program deassert it.
+  gpio_put(PIN_RESB, 0);
+
   // /OE1 to /OE3 are always outputs.
   pio_sm_set_consecutive_pindirs(pio, sm, PIN_OE1, 3, true);
   // R/W is always an input.
   pio_sm_set_consecutive_pindirs(pio, sm, PIN_RW, 1, false);
   // PHI2 is always an output.
   pio_sm_set_consecutive_pindirs(pio, sm, PIN_PHI2, 1, true);
-  // IRQ, RESET and NMI are always outputs.
-  pio_sm_set_consecutive_pindirs(pio, sm, PIN_IRQB, 3, true);
 
   pio_sm_config c = clk6502_program_get_default_config(offset);
 
@@ -174,13 +184,6 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   // Need to run the statemachine at 100 MHz.
   const float div = clock_get_hz(clk_sys) / 100000000;
   sm_config_set_clkdiv(&c, div);
-
-  // Do not assert IRQ nor NMI.
-  gpio_put(PIN_NMIB, 1);
-  gpio_put(PIN_IRQB, 1);
-
-  // Assert RESET, let the main program deassert it.
-  gpio_put(PIN_RESB, 0);
 
   // Start the statemachine.
   pio_sm_init(pio, sm, offset, &c);
