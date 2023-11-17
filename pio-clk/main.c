@@ -22,13 +22,21 @@ int main() {
 
   clk6502_program_init(pio, sm, offset);
 
-  uint request;
+  // Take the 6502 out of reset after at least two clock ticks
+  // or 1 us.
+  sleep_us(1);
+  gpio_put(PIN_RESB, 1);
+
   while (true) {
-    request = pio_sm_get_blocking(pio, sm);
-    if (request & 1 == 0) {
-      // Write request, ignore.
-    } else {
-      // Read request, return NOP.
+    const uint32_t request = pio_sm_get_blocking(pio, sm);
+
+    // A 32-bit request is of the form:
+    // ....... | A15-A0 | D7-D0 | R/W
+    const int      do_read = (request & 0x0000001);
+    const uint8_t  data    = (request & 0x00001FE) >> 1;
+    const uint16_t address = (request & 0x1FFFE00) >> 9;
+
+    if (do_read) {
       pio_sm_put_blocking(pio, sm, 0xEA);
     }
   }
