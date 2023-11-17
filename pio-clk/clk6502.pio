@@ -129,17 +129,10 @@ reading_from_us:
 
 
 static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
-  // Connect all relevant GPIO pins.
-  const uint pins[] = {
-    0, 1, 2, 3, 4, 5, 6, 7,  // D0-D7, A0-A7, A8-A15
-    PIN_OE1, PIN_OE2, PIN_OE3,
-    PIN_RW,
-    PIN_PHI2,
-    PIN_IRQB, PIN_RESB, PIN_NMIB
-  };
-  for (uint i = 0; i < count_of(pins); i++) {
-    pio_gpio_init(pio, pins[i]);
-  }
+  // Initialise the NMIB, RESB and IRQB pins.
+  gpio_init(PIN_NMIB);
+  gpio_init(PIN_RESB);
+  gpio_init(PIN_IRQB);
 
   // The NMIB, IRQB and RESB pins are always outputs.
   gpio_set_dir(PIN_NMIB, GPIO_OUT);
@@ -150,8 +143,20 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   gpio_put(PIN_NMIB, 1);
   gpio_put(PIN_IRQB, 1);
 
-  // Assert /RESET, let the main program deassert it.
+  // Assert /RESET for at least two cycles, let the main program deassert it.
   gpio_put(PIN_RESB, 0);
+  sleep_us(5);
+
+  // Connect all relevant GPIO pins.
+  const uint pins[] = {
+    0, 1, 2, 3, 4, 5, 6, 7,  // D0-D7, A0-A7, A8-A15
+    PIN_OE1, PIN_OE2, PIN_OE3,
+    PIN_RW,
+    PIN_PHI2
+  };
+  for (uint i = 0; i < count_of(pins); i++) {
+    pio_gpio_init(pio, pins[i]);
+  }
 
   // /OE1 to /OE3 are always outputs.
   pio_sm_set_consecutive_pindirs(pio, sm, PIN_OE1, 3, true);
