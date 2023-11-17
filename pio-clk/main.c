@@ -13,6 +13,8 @@
 
 #define PIN_AUDIO 20
 
+#define OPCODE_NOP 0xEA
+
 
 int main() {
   stdio_init_all();
@@ -49,11 +51,7 @@ int main() {
     const uint16_t address = (request & 0x1FFFE00) >> 9;
 
     if (do_read) {
-      // RESET vector points to 0x1234, otherwise return NOP (0xEA).
-      const uint8_t response =
-        address == 0xFFFC ? 0x34 :
-        address == 0xFFFD ? 0x12 : 0xEA;
-      pio_sm_put_blocking(pio, sm, response);
+      pio_sm_put_blocking(pio, sm, OPCODE_NOP);
     }
   }
 

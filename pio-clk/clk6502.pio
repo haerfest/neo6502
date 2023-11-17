@@ -187,9 +187,16 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   sm_config_set_out_shift(&c, false, false, 8);
   
   // Need to run the statemachine at 100 MHz.
-  const float div = clock_get_hz(clk_sys) / 100000000;
+  const float freq = 100000000;
+  const float div = clock_get_hz(clk_sys) / freq;
   sm_config_set_clkdiv(&c, div);
 
+  // Drain the FIFOs.
+  pio_sm_drain_tx_fifo(pio, sm);
+  const uint level = pio_sm_get_rx_fifo_level(pio, sm);
+  for (uint i = 0; i < level; i++)
+    (void) pio_sm_get(pio, sm);
+  
   // Start the statemachine.
   pio_sm_init(pio, sm, offset, &c);
   pio_sm_set_enabled(pio, sm, true);
