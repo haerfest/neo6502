@@ -19,10 +19,10 @@
   ;
   ; The side pin is used to generate the 2 MHz clock.
   ;
-  ; Note the 74LVC245APW enable time of max 8.5 ns at 3.3V, or ~1 cycle,
-  ; which we must honour.
+  ; Note the 74LVC245APW enable time of max 8.5 ns at 3.3V, or ~1 cycle.  In
+  ; practice wee need 3 cycles for the signal to stabilise.
   ;
-  ; Upon a read request the Arm is given 190 ns to respond.
+  ; Upon a read request the Arm is given 16 PIO cycles or 160 ns to respond.
   ;
   ; L<nn> and H<nn> indicate where in the PHI2 L[ow] and H[igh] cycles we
   ; are, for <nn> in cycle # 00..24.
@@ -177,10 +177,13 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   // GPIO21 (PHI2) is the sideset pin.
   sm_config_set_sideset_pins(&c, PIN_PHI2);
 
-  // Auto-push A0-A15 + D0-D7 + R/W to the RX FIFO, shifting left.
+  // Auto-push a 32-bit request to the RX FIFO, either:
+  // - A read  request: address:16 |  0x00  | 0x01
+  // - A write request: address:16 | byte:8 | 0x00
   sm_config_set_in_shift(&c, SHIFT_LEFT, PULL_AUTO, 32);
 
-  // Manual pull D0-D7 from the TX FIFO, shifting right.
+  // Manual pull the response to a write request from the TX FIFO, shifting
+  // right. The response: 0x000000 | byte:8.
   sm_config_set_out_shift(&c, SHIFT_RIGHT, PULL_MANUAL, 8);
   
   // Need to run the statemachine at 100 MHz.
@@ -207,7 +210,8 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   pio_sm_init(pio, sm, offset, &c);
   pio_sm_set_enabled(pio, sm, true);
 
-  // Keep /RESET asserted for at least two cycles (1 ns).
+  // Keep /RESET asserted for at least two cycles (1 ns), so we assert for
+  // two cycles.
   sleep_us(2);
 }
 
