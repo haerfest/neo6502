@@ -1,7 +1,8 @@
 /**
  * main.c
  *
- * Does nothing yet.
+ * Uses PIO (Programmable I/O) to drive the 65C02 at 2 MHz, reading and writing
+ * bytes via the FIFOs.
  */
 
 
