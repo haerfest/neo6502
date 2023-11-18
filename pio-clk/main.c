@@ -11,15 +11,20 @@
 #include "clk6502.pio.h"
 
 
-#define PIN_AUDIO 20
+#define PIN_AUDIO    20
 
-#define OPCODE_NOP 0xEA
+#define OPCODE_NOP   0xEA
+
+#define MAX_REQUESTS 50
 
 
 int main() {
+  uint32_t requests[MAX_REQUESTS];
+  uint     request_index = 0;
+
   stdio_init_all();
 
-  sleep_ms(5000);
+  sleep_ms(2000);
 
   gpio_init(PIN_AUDIO);
   gpio_set_dir(PIN_AUDIO, GPIO_OUT);
@@ -44,13 +49,11 @@ int main() {
   while (true) {
     const uint32_t request = pio_sm_get_blocking(pio, sm);
 
-    // A 32-bit request is of the form:
-    // ....... | A15-A0 | D7-D0 | R/W
-    const int      do_read = (request & 0x0000001);
-    const uint8_t  data    = (request & 0x00001FE) >> 1;
-    const uint16_t address = (request & 0x1FFFE00) >> 9;
+    if (request_index < MAX_REQUESTS) {
+      requests[request_index++] = request;
+    }
 
-    if (do_read) {
+    if (request & 1) {
       pio_sm_put_blocking(pio, sm, OPCODE_NOP);
     }
   }

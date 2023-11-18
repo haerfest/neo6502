@@ -4,12 +4,12 @@
 .define LOW    0
 .define HIGH   1
 
-.define READ   1
-.define WRITE  0
+.define READ   0x01
+.define WRITE  0x00
 
-.define OE1    0b011
+.define OE1    0b110
 .define OE2    0b101
-.define OE3    0b110
+.define OE3    0b011
 
   ;
   ; With a 6502 running at 2 MHz each period is 500 ns, for 250 ns per half-
@@ -33,42 +33,42 @@
 L00:
 
   ;
-  ; L00: Assume we'll be read from (1 cycle).
+  ; L00: Assume we'll be read from (9 cycles).
   ;
-  set x, READ                   side LOW          ; set R/W flag
+  set x, READ                   side LOW [8]      ; set R/W flag
 
   ;
-  ; L01: Prepare for reading address A0-A15 (14 cycles).
+  ; L09: Prepare for reading address A0-A15 (6 cycles).
   ;
   mov osr, null                 side LOW          ; set OSR to 0x00000000
   out pindirs, 8                side LOW          ; set GPIO0-7 to inputs
-  set pins, OE2                 side LOW [11]     ; enable /OE2 for A8-A15
+  set pins, OE2                 side LOW [3]      ; enable /OE2 for A8-A15
 
   ;
   ; L15: Address now stable, read A0-A15 into ISR (4 cycles).
   ;
   in pins, 8                    side LOW          ; read A0-A7
-  set pins, OE1                 side LOW [1]      ; enable /OE1 for A0-A7
+  set pins, OE1                 side LOW [3]      ; enable /OE1 for A0-A7
   in pins, 8                    side LOW          ; read A8-A15
 
   ;
-  ; L19: Save A0-A15 in Y and check R/W pin (2 cycles).
+  ; L21: Save A0-A15 in Y and check R/W pin (2 cycles).
   ;
   mov y, isr                    side LOW          ; save A0-A15 in Y
-  jmp pin, reading_from_us      side LOW          ; check R/W line
+  jmp pin, reading_from_rp2040  side LOW          ; check R/W line
 
-writing_to_us:
+writing_to_rp2040:
 
   ;
-  ; L21: Prepare for being written to (4 cycles).
+  ; L23: Prepare for being written to, insert A0-A15 into ISR (3 cycles).
   ;
   set x, WRITE                  side LOW          ; set R/W to writing
-  set pins, OE3                 side LOW [2]      ; enable /OE3 for D0-D7
+  in y, 16                      side LOW          ; insert A0-A15 in ISR
 
   ;
-  ; H00: Insert A0-A15 into ISR and wait (14 cycles).
+  ; H00: Enable /OE3 and wait until byte becomes available (14 cycles).
   ;
-  in y, 16                      side HIGH [13]    ; insert A0-A15 in ISR
+  set pins, OE3                 side HIGH [13]    ; enable /OE3 for D0-D7
 
   ;
   ; H14: Earliest moment that D0-D7 contains byte to write (1 cycle).
@@ -78,38 +78,37 @@ writing_to_us:
   ;
   ; H15: Auto-push to RX FIFO (1 cycle).
   ;
-  in x, 1                       side HIGH         ; include write-bit, push
+  in x, 8                       side HIGH         ; include R/W, push
 
   ;
   ; H16: Waste remainder of PHI2-high period (9 cycles).
   ;
   jmp L00                       side HIGH [8]     ; move PHI2 low
 
-reading_from_us:
+reading_from_rp2040:
 
   ;
-  ; L21: Auto-push read request to RX FIFO (2 cycles).
+  ; L23: Auto-push read request to RX FIFO (2 cycles).
   ;
   in null, 8                    side LOW          ; insert dummy byte in ISR
-  in x, 1                       side LOW          ; include read-bit, push
+  in x, 8                       side LOW          ; include R/W, push
 
   ;
-  ; L23: Set GPIO0-7 to outputs and enable /OE3 (2 cycles).
+  ; H00: Set GPIO0-7 to outputs (2 cycles).
   ;
-  mov osr, ~ null               side LOW          ; set OSR to 0x11111111
-  out pindirs, 8                side LOW          ; set GPIO0-7 to outputs
+  mov osr, ~ null               side HIGH         ; set OSR to 0x11111111
+  out pindirs, 8                side HIGH         ; set GPIO0-7 to outputs
 
   ;
-  ; H00: Wait to give Arm more time (17 cycles).
+  ; H02: Enable /OE3 and wait to give Arm time (14 cycles).
   ;
-  set pins, OE3                 side HIGH         ; enable /OE3 for D0-D7
-  nop                           side HIGH [15]    ; wait
+  set pins, OE3                 side HIGH [13]    ; enable /OE3 for D0-D7
 
   ;
-  ; H17: Read Arm's response and output D0-D7, then wait 60 ns (8 cycles).
+  ; H16: Read Arm's response and output D0-D7, then wait 70 ns (9 cycles).
   ;
   pull block                    side HIGH         ; fetch from FIFO TX
-  out pins, 8                   side HIGH [6]     ; write D0-D7, wait 60 ns
+  out pins, 8                   side HIGH [7]     ; write D0-D7, wait 70 ns
 
 .wrap
 
@@ -118,14 +117,20 @@ reading_from_us:
 #include "hardware/clocks.h"
 
 
-#define PIN_OE1   8
-#define PIN_OE2   9
-#define PIN_OE3  10
-#define PIN_RW   11
-#define PIN_PHI2 21
-#define PIN_IRQB 25
-#define PIN_RESB 26
-#define PIN_NMIB 27
+#define SHIFT_LEFT  false
+#define SHIFT_RIGHT true
+#define PULL_AUTO   true
+#define PULL_MANUAL false
+
+#define PIN_D0       0
+#define PIN_OE1      8
+#define PIN_OE2      9
+#define PIN_OE3     10
+#define PIN_RW      11
+#define PIN_PHI2    21
+#define PIN_IRQB    25
+#define PIN_RESB    26
+#define PIN_NMIB    27
 
 
 static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
@@ -143,13 +148,12 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   gpio_put(PIN_NMIB, 1);
   gpio_put(PIN_IRQB, 1);
 
-  // Assert /RESET for at least two cycles, let the main program deassert it.
+  // Assert /RESET.
   gpio_put(PIN_RESB, 0);
-  sleep_us(5);
 
   // Connect all relevant GPIO pins.
   const uint pins[] = {
-    0, 1, 2, 3, 4, 5, 6, 7,  // D0-D7, A0-A7, A8-A15
+    PIN_D0, PIN_D0+1, PIN_D0+2, PIN_D0+3, PIN_D0+4, PIN_D0+5, PIN_D0+6, PIN_D0+7,
     PIN_OE1, PIN_OE2, PIN_OE3,
     PIN_RW,
     PIN_PHI2
@@ -158,18 +162,11 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
     pio_gpio_init(pio, pins[i]);
   }
 
-  // /OE1 to /OE3 are always outputs.
-  pio_sm_set_consecutive_pindirs(pio, sm, PIN_OE1, 3, true);
-  // R/W is always an input.
-  pio_sm_set_consecutive_pindirs(pio, sm, PIN_RW, 1, false);
-  // PHI2 is always an output.
-  pio_sm_set_consecutive_pindirs(pio, sm, PIN_PHI2, 1, true);
-
   pio_sm_config c = clk6502_program_get_default_config(offset);
 
   // GPIO0-7 (D0-D7, A0-A15) are bidrectional pins.
-  sm_config_set_in_pins(&c, 0);
-  sm_config_set_out_pins(&c, 0, 8);
+  sm_config_set_in_pins(&c, PIN_D0);
+  sm_config_set_out_pins(&c, PIN_D0, 8);
 
   // GPIO8-10 (/OE1 to /OE3) are set pins.
   sm_config_set_set_pins(&c, PIN_OE1, 3);
@@ -181,25 +178,37 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   sm_config_set_sideset_pins(&c, PIN_PHI2);
 
   // Auto-push A0-A15 + D0-D7 + R/W to the RX FIFO, shifting left.
-  sm_config_set_in_shift(&c, false, true, 16 + 8 + 1);
+  sm_config_set_in_shift(&c, SHIFT_LEFT, PULL_AUTO, 32);
 
-  // Manual pull D0-D7 from the TX FIFO, shifting left.
-  sm_config_set_out_shift(&c, false, false, 8);
+  // Manual pull D0-D7 from the TX FIFO, shifting right.
+  sm_config_set_out_shift(&c, SHIFT_RIGHT, PULL_MANUAL, 8);
   
   // Need to run the statemachine at 100 MHz.
   const float freq = 100000000;
   const float div = clock_get_hz(clk_sys) / freq;
   sm_config_set_clkdiv(&c, div);
 
+  // /OE1 to /OE3 are always outputs.
+  pio_sm_set_consecutive_pindirs(pio, sm, PIN_OE1, 3, GPIO_OUT);
+
+  // R/W is always an input.
+  pio_sm_set_consecutive_pindirs(pio, sm, PIN_RW, 1, GPIO_IN);
+
+  // PHI2 is always an output.
+  pio_sm_set_consecutive_pindirs(pio, sm, PIN_PHI2, 1, GPIO_OUT);
+
   // Drain the FIFOs.
   pio_sm_drain_tx_fifo(pio, sm);
   const uint level = pio_sm_get_rx_fifo_level(pio, sm);
   for (uint i = 0; i < level; i++)
     (void) pio_sm_get(pio, sm);
-  
+
   // Start the statemachine.
   pio_sm_init(pio, sm, offset, &c);
   pio_sm_set_enabled(pio, sm, true);
+
+  // Keep /RESET asserted for at least two cycles (1 ns).
+  sleep_us(2);
 }
 
 %}
