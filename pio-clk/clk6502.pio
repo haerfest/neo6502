@@ -1,8 +1,8 @@
 .program clk6502
 .side_set 1
 
-.define LOW    0
-.define HIGH   1
+.define PHI2_LOW    0
+.define PHI2_HIGH   1
 
 .define READ   0x01
 .define WRITE  0x00
@@ -22,7 +22,7 @@
   ; Note the 74LVC245APW enable time of max 8.5 ns at 3.3V, or ~1 cycle.  In
   ; practice wee need 3 cycles for the signal to stabilise.
   ;
-  ; Upon a read request the Arm is given 16 PIO cycles or 160 ns to respond.
+  ; Upon a read request the Arm is given 17 PIO cycles or 170 ns to respond.
   ;
   ; L<nn> and H<nn> indicate where in the PHI2 L[ow] and H[igh] cycles we
   ; are, for <nn> in cycle # 00..24.
@@ -35,80 +35,80 @@ L00:
   ;
   ; L00: Assume we'll be read from (9 cycles).
   ;
-  set x, READ                   side LOW [8]      ; set R/W flag
+  set x, READ                   side PHI2_LOW [8]     ; set R/W flag
 
   ;
   ; L09: Prepare for reading address A0-A15 (6 cycles).
   ;
-  mov osr, null                 side LOW          ; set OSR to 0x00000000
-  out pindirs, 8                side LOW          ; set GPIO0-7 to inputs
-  set pins, OE2                 side LOW [3]      ; enable /OE2 for A8-A15
+  mov osr, null                 side PHI2_LOW         ; set OSR to 0x00000000
+  out pindirs, 8                side PHI2_LOW         ; set GPIO0-7 to inputs
+  set pins, OE2                 side PHI2_LOW [3]     ; enable /OE2 for A8-A15
 
   ;
-  ; L15: Address now stable, read A0-A15 into ISR (4 cycles).
+  ; L15: Address now stable, read A0-A15 into ISR (6 cycles).
   ;
-  in pins, 8                    side LOW          ; read A0-A7
-  set pins, OE1                 side LOW [3]      ; enable /OE1 for A0-A7
-  in pins, 8                    side LOW          ; read A8-A15
+  in pins, 8                    side PHI2_LOW         ; read A0-A7
+  set pins, OE1                 side PHI2_LOW [3]     ; enable /OE1 for A0-A7
+  in pins, 8                    side PHI2_LOW         ; read A8-A15
 
   ;
   ; L21: Save A0-A15 in Y and check R/W pin (2 cycles).
   ;
-  mov y, isr                    side LOW          ; save A0-A15 in Y
-  jmp pin, reading_from_rp2040  side LOW          ; check R/W line
+  mov y, isr                    side PHI2_LOW         ; save A0-A15 in Y
+  jmp pin, reading_from_rp2040  side PHI2_LOW         ; check R/W line
 
 writing_to_rp2040:
 
   ;
   ; L23: Prepare for being written to, insert A0-A15 into ISR (2 cycles).
   ;
-  set x, WRITE                  side LOW          ; set R/W to writing
-  in y, 16                      side LOW          ; insert A0-A15 in ISR
+  set x, WRITE                  side PHI2_LOW         ; set R/W to writing
+  in y, 16                      side PHI2_LOW         ; insert A0-A15 in ISR
 
   ;
   ; H00: Enable /OE3 and wait until byte becomes available (14 cycles).
   ;
-  set pins, OE3                 side HIGH [13]    ; enable /OE3 for D0-D7
+  set pins, OE3                 side PHI2_HIGH [13]   ; enable /OE3 for D0-D7
 
   ;
   ; H14: Earliest moment that D0-D7 contains byte to write (1 cycle).
   ;
-  in pins, 8                    side HIGH         ; read D0-D7
+  in pins, 8                    side PHI2_HIGH        ; read D0-D7
 
   ;
   ; H15: Auto-push to RX FIFO (1 cycle).
   ;
-  in x, 8                       side HIGH         ; include R/W, push
+  in x, 8                       side PHI2_HIGH        ; include R/W, push
 
   ;
   ; H16: Waste remainder of PHI2-high period (9 cycles).
   ;
-  jmp L00                       side HIGH [8]     ; move PHI2 low
+  jmp L00                       side PHI2_HIGH [8]    ; move PHI2 low
 
 reading_from_rp2040:
 
   ;
   ; L23: Auto-push read request to RX FIFO (2 cycles).
   ;
-  in null, 8                    side LOW          ; insert dummy byte in ISR
-  in x, 8                       side LOW          ; include R/W, push
+  in null, 8                    side PHI2_LOW         ; insert dummy byte in ISR
+  in x, 8                       side PHI2_LOW         ; include R/W, push
 
   ;
   ; H00: Set GPIO0-7 to outputs (2 cycles).
   ;
-  mov osr, ~ null               side HIGH         ; set OSR to 0x11111111
-  out pindirs, 8                side HIGH         ; set GPIO0-7 to outputs
+  mov osr, ~ null               side PHI2_HIGH        ; set OSR to 0x11111111
+  out pindirs, 8                side PHI2_HIGH        ; set GPIO0-7 to outputs
 
   ;
-  ; H02: Enable /OE3 and wait to give Arm time (14 cycles).
+  ; H02: Enable /OE3 and wait to give Arm time (15 cycles).
   ;
-  set pins, OE3                 side HIGH [13]    ; enable /OE3 for D0-D7
+  set pins, OE3                 side PHI2_HIGH [14]   ; enable /OE3 for D0-D7
 
   ;
-  ; H16: Read Arm's response and output D0-D7, then wait 70 ns (9 cycles).
+  ; H17: Read Arm's response and output D0-D7, then wait 60 ns (8 cycles).
   ;
-  pull block                    side HIGH         ; fetch from FIFO TX
-  out pins, 8                   side HIGH [7]     ; write D0-D7, wait 70 ns
+  pull block                    side PHI2_HIGH        ; fetch from FIFO TX
+  out pins, 8                   side PHI2_HIGH [6]    ; write D0-D7, wait 60 ns
 
 .wrap
 

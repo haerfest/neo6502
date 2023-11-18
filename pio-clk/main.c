@@ -12,7 +12,9 @@
 #include "clk6502.pio.h"
 
 
-#define OPCODE_NOP 0xEA
+#define OPCODE_NOP   0xEA
+
+#define MAX_REQUESTS 50
 
 
 /*
@@ -38,6 +40,9 @@
 */
   
 int main() {
+  uint32_t requests[MAX_REQUESTS];
+  uint     request_index = 0;
+ 
   stdio_init_all();
 
   PIO  pio    = pio0;
@@ -52,10 +57,13 @@ int main() {
   while (true) {
     const uint32_t request = pio_sm_get_blocking(pio, sm);
 
+    // Store the first N requests for debugging.
+    if (request_index < MAX_REQUESTS)
+      requests[request_index++] = request;
+
     // Upon a read request, return a NOP.
-    if (request & 1) {
+    if (request & 1)
       pio_sm_put_blocking(pio, sm, OPCODE_NOP);
-    }
   }
 
   __builtin_unreachable();
