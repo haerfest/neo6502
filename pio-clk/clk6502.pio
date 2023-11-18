@@ -211,7 +211,7 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   pio_sm_set_enabled(pio, sm, true);
 
   // Keep /RESET asserted for at least two cycles (1 ns), so we assert for
-  // two cycles.
+  // twice that.
   sleep_us(2);
 }
 
