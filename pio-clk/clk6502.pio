@@ -60,7 +60,7 @@ L00:
 writing_to_rp2040:
 
   ;
-  ; L23: Prepare for being written to, insert A0-A15 into ISR (3 cycles).
+  ; L23: Prepare for being written to, insert A0-A15 into ISR (2 cycles).
   ;
   set x, WRITE                  side LOW          ; set R/W to writing
   in y, 16                      side LOW          ; insert A0-A15 in ISR
