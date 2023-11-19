@@ -128,29 +128,9 @@ reading_from_rp2040:
 #define PIN_OE3     10
 #define PIN_RW      11
 #define PIN_PHI2    21
-#define PIN_IRQB    25
-#define PIN_RESB    26
-#define PIN_NMIB    27
 
 
 static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
-  // Initialise the NMIB, RESB and IRQB pins.
-  gpio_init(PIN_NMIB);
-  gpio_init(PIN_RESB);
-  gpio_init(PIN_IRQB);
-
-  // The NMIB, IRQB and RESB pins are always outputs.
-  gpio_set_dir(PIN_NMIB, GPIO_OUT);
-  gpio_set_dir(PIN_IRQB, GPIO_OUT);
-  gpio_set_dir(PIN_RESB, GPIO_OUT);
-
-  // Do not assert /IRQ nor /NMI.
-  gpio_put(PIN_NMIB, 1);
-  gpio_put(PIN_IRQB, 1);
-
-  // Assert /RESET.
-  gpio_put(PIN_RESB, 0);
-
   // Connect all relevant GPIO pins.
   const uint pins[] = {
     PIN_D0, PIN_D0+1, PIN_D0+2, PIN_D0+3, PIN_D0+4, PIN_D0+5, PIN_D0+6, PIN_D0+7,
@@ -209,10 +189,6 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   // Start the statemachine.
   pio_sm_init(pio, sm, offset, &c);
   pio_sm_set_enabled(pio, sm, true);
-
-  // Keep /RESET asserted for at least two cycles (1 ns), so we assert for
-  // two cycles.
-  sleep_us(2);
 }
 
 %}
