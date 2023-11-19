@@ -1,0 +1,218 @@
+.program clk6502
+.side_set 1
+
+.define PHI2_LOW    0
+.define PHI2_HIGH   1
+
+.define READ   0x01
+.define WRITE  0x00
+
+.define OE1    0b110
+.define OE2    0b101
+.define OE3    0b011
+
+  ;
+  ; With a 6502 running at 2 MHz each period is 500 ns, for 250 ns per half-
+  ; period (PHI2 low/high). With a 100 MHz PIO clock, we can fit 25 instructions
+  ; into each PHI2 half-period, each instruction taking 10 ns excluding delays.
+  ; We have space for 32 instructions.
+  ;
+  ; The side pin is used to generate the 2 MHz clock.
+  ;
+  ; Note the 74LVC245APW enable time of max 8.5 ns at 3.3V, or ~1 cycle.  In
+  ; practice wee need 3 cycles for the signal to stabilise.
+  ;
+  ; Upon a read request the Arm is given 17 PIO cycles or 170 ns to respond.
+  ;
+  ; L<nn> and H<nn> indicate where in the PHI2 L[ow] and H[igh] cycles we
+  ; are, for <nn> in cycle # 00..24.
+  ;
+
+.wrap_target
+
+L00:
+
+  ;
+  ; L00: Assume we'll be read from (9 cycles).
+  ;
+  set x, READ                   side PHI2_LOW [8]     ; set R/W flag
+
+  ;
+  ; L09: Prepare for reading address A0-A15 (6 cycles).
+  ;
+  mov osr, null                 side PHI2_LOW         ; set OSR to 0x00000000
+  out pindirs, 8                side PHI2_LOW         ; set GPIO0-7 to inputs
+  set pins, OE2                 side PHI2_LOW [3]     ; enable /OE2 for A8-A15
+
+  ;
+  ; L15: Address now stable, read A0-A15 into ISR (6 cycles).
+  ;
+  in pins, 8                    side PHI2_LOW         ; read A0-A7
+  set pins, OE1                 side PHI2_LOW [3]     ; enable /OE1 for A0-A7
+  in pins, 8                    side PHI2_LOW         ; read A8-A15
+
+  ;
+  ; L21: Save A0-A15 in Y and check R/W pin (2 cycles).
+  ;
+  mov y, isr                    side PHI2_LOW         ; save A0-A15 in Y
+  jmp pin, reading_from_rp2040  side PHI2_LOW         ; check R/W line
+
+writing_to_rp2040:
+
+  ;
+  ; L23: Prepare for being written to, insert A0-A15 into ISR (2 cycles).
+  ;
+  set x, WRITE                  side PHI2_LOW         ; set R/W to writing
+  in y, 16                      side PHI2_LOW         ; insert A0-A15 in ISR
+
+  ;
+  ; H00: Enable /OE3 and wait until byte becomes available (14 cycles).
+  ;
+  set pins, OE3                 side PHI2_HIGH [13]   ; enable /OE3 for D0-D7
+
+  ;
+  ; H14: Earliest moment that D0-D7 contains byte to write (1 cycle).
+  ;
+  in pins, 8                    side PHI2_HIGH        ; read D0-D7
+
+  ;
+  ; H15: Auto-push to RX FIFO (1 cycle).
+  ;
+  in x, 8                       side PHI2_HIGH        ; include R/W, push
+
+  ;
+  ; H16: Waste remainder of PHI2-high period (9 cycles).
+  ;
+  jmp L00                       side PHI2_HIGH [8]    ; move PHI2 low
+
+reading_from_rp2040:
+
+  ;
+  ; L23: Auto-push read request to RX FIFO (2 cycles).
+  ;
+  in null, 8                    side PHI2_LOW         ; insert dummy byte in ISR
+  in x, 8                       side PHI2_LOW         ; include R/W, push
+
+  ;
+  ; H00: Set GPIO0-7 to outputs (2 cycles).
+  ;
+  mov osr, ~ null               side PHI2_HIGH        ; set OSR to 0x11111111
+  out pindirs, 8                side PHI2_HIGH        ; set GPIO0-7 to outputs
+
+  ;
+  ; H02: Enable /OE3 and wait to give Arm time (15 cycles).
+  ;
+  set pins, OE3                 side PHI2_HIGH [14]   ; enable /OE3 for D0-D7
+
+  ;
+  ; H17: Read Arm's response and output D0-D7, then wait 60 ns (8 cycles).
+  ;
+  pull block                    side PHI2_HIGH        ; fetch from FIFO TX
+  out pins, 8                   side PHI2_HIGH [6]    ; write D0-D7, wait 60 ns
+
+.wrap
+
+% c-sdk {
+
+#include "hardware/clocks.h"
+
+
+#define SHIFT_LEFT  false
+#define SHIFT_RIGHT true
+#define PULL_AUTO   true
+#define PULL_MANUAL false
+
+#define PIN_D0       0
+#define PIN_OE1      8
+#define PIN_OE2      9
+#define PIN_OE3     10
+#define PIN_RW      11
+#define PIN_PHI2    21
+#define PIN_IRQB    25
+#define PIN_RESB    26
+#define PIN_NMIB    27
+
+
+static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
+  // Initialise the NMIB, RESB and IRQB pins.
+  gpio_init(PIN_NMIB);
+  gpio_init(PIN_RESB);
+  gpio_init(PIN_IRQB);
+
+  // The NMIB, IRQB and RESB pins are always outputs.
+  gpio_set_dir(PIN_NMIB, GPIO_OUT);
+  gpio_set_dir(PIN_IRQB, GPIO_OUT);
+  gpio_set_dir(PIN_RESB, GPIO_OUT);
+
+  // Do not assert /IRQ nor /NMI.
+  gpio_put(PIN_NMIB, 1);
+  gpio_put(PIN_IRQB, 1);
+
+  // Assert /RESET.
+  gpio_put(PIN_RESB, 0);
+
+  // Connect all relevant GPIO pins.
+  const uint pins[] = {
+    PIN_D0, PIN_D0+1, PIN_D0+2, PIN_D0+3, PIN_D0+4, PIN_D0+5, PIN_D0+6, PIN_D0+7,
+    PIN_OE1, PIN_OE2, PIN_OE3,
+    PIN_RW,
+    PIN_PHI2
+  };
+  for (uint i = 0; i < count_of(pins); i++) {
+    pio_gpio_init(pio, pins[i]);
+  }
+
+  pio_sm_config c = clk6502_program_get_default_config(offset);
+
+  // GPIO0-7 (D0-D7, A0-A15) are bidrectional pins.
+  sm_config_set_in_pins(&c, PIN_D0);
+  sm_config_set_out_pins(&c, PIN_D0, 8);
+
+  // GPIO8-10 (/OE1 to /OE3) are set pins.
+  sm_config_set_set_pins(&c, PIN_OE1, 3);
+
+  // GPIO11 (R/W) is used to JMP on.
+  sm_config_set_jmp_pin(&c, PIN_RW);
+
+  // GPIO21 (PHI2) is the sideset pin.
+  sm_config_set_sideset_pins(&c, PIN_PHI2);
+
+  // Auto-push a 32-bit request to the RX FIFO, either:
+  // - A read  request: address:16 |  0x00  | 0x01
+  // - A write request: address:16 | byte:8 | 0x00
+  sm_config_set_in_shift(&c, SHIFT_LEFT, PULL_AUTO, 32);
+
+  // Manual pull the response to a write request from the TX FIFO, shifting
+  // right. The response: 0x000000 | byte:8.
+  sm_config_set_out_shift(&c, SHIFT_RIGHT, PULL_MANUAL, 8);
+  
+  // Need to run the statemachine at 100 MHz.
+  const float freq = 100000000;
+  const float div = clock_get_hz(clk_sys) / freq;
+  sm_config_set_clkdiv(&c, div);
+
+  // /OE1 to /OE3 are always outputs.
+  pio_sm_set_consecutive_pindirs(pio, sm, PIN_OE1, 3, GPIO_OUT);
+
+  // R/W is always an input.
+  pio_sm_set_consecutive_pindirs(pio, sm, PIN_RW, 1, GPIO_IN);
+
+  // PHI2 is always an output.
+  pio_sm_set_consecutive_pindirs(pio, sm, PIN_PHI2, 1, GPIO_OUT);
+
+  // Drain the FIFOs.
+  pio_sm_drain_tx_fifo(pio, sm);
+  const uint level = pio_sm_get_rx_fifo_level(pio, sm);
+  for (uint i = 0; i < level; i++)
+    (void) pio_sm_get(pio, sm);
+
+  // Start the statemachine.
+  pio_sm_init(pio, sm, offset, &c);
+  pio_sm_set_enabled(pio, sm, true);
+
+  // Keep /RESET asserted for at least two cycles (1 ns), so we assert for
+  // two cycles.
+  sleep_us(2);
+}
+
+%}
