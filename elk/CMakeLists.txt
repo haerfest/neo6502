@@ -5,7 +5,7 @@ set(CMAKE_BUILD_TYPE Debug)
 
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
-project(pio-clk)
+project(elk)
 
 pico_sdk_init()
 
