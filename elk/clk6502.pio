@@ -22,7 +22,7 @@
   ; Note the 74LVC245APW enable time of max 8.5 ns at 3.3V, or ~1 cycle.  In
   ; practice wee need 3 cycles for the signal to stabilise.
   ;
-  ; Upon a read request the Arm is given 17 PIO cycles or 170 ns to respond.
+  ; Upon a read request the Arm is given 18 PIO cycles or 180 ns to respond.
   ;
   ; L<nn> and H<nn> indicate where in the PHI2 L[ow] and H[igh] cycles we
   ; are, for <nn> in cycle # 00..24.
@@ -52,23 +52,22 @@ L00:
   in pins, 8                    side PHI2_LOW         ; read A8-A15
 
   ;
-  ; L21: Save A0-A15 in Y and check R/W pin (2 cycles).
+  ; L21: Check R/W pin (1 cycle).
   ;
-  mov y, isr                    side PHI2_LOW         ; save A0-A15 in Y
   jmp pin, reading_from_rp2040  side PHI2_LOW         ; check R/W line
 
 writing_to_rp2040:
 
   ;
-  ; L23: Prepare for being written to, insert A0-A15 into ISR (2 cycles).
+  ; L22: Prepare for being written to, enable /OE3 (3 ycles)
   ;
   set x, WRITE                  side PHI2_LOW         ; set R/W to writing
-  in y, 16                      side PHI2_LOW         ; insert A0-A15 in ISR
+  set pins, OE3                 side PHI2_LOW [1]     ; enable /OE3 for D0-D7
 
   ;
-  ; H00: Enable /OE3 and wait until byte becomes available (14 cycles).
+  ; H00: Wait until byte becomes available (14 cycles).
   ;
-  set pins, OE3                 side PHI2_HIGH [13]   ; enable /OE3 for D0-D7
+  nop                           side PHI2_HIGH [13]   ; wait
 
   ;
   ; H14: Earliest moment that D0-D7 contains byte to write (1 cycle).
@@ -88,10 +87,10 @@ writing_to_rp2040:
 reading_from_rp2040:
 
   ;
-  ; L23: Auto-push read request to RX FIFO (2 cycles).
+  ; L22: Auto-push read request to RX FIFO (3 cycles).
   ;
   in null, 8                    side PHI2_LOW         ; insert dummy byte in ISR
-  in x, 8                       side PHI2_LOW         ; include R/W, push
+  in x, 8                       side PHI2_LOW [1]     ; include R/W, push
 
   ;
   ; H00: Set GPIO0-7 to outputs (2 cycles).
@@ -165,7 +164,7 @@ static inline void clk6502_program_init(PIO pio, uint sm, uint offset) {
   // Manual pull the response to a write request from the TX FIFO, shifting
   // right. The response: 0x000000 | byte:8.
   sm_config_set_out_shift(&c, SHIFT_RIGHT, PULL_MANUAL, 8);
-  
+
   // Need to run the statemachine at 100 MHz.
   const float freq = 100000000;
   const float div = clock_get_hz(clk_sys) / freq;

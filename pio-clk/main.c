@@ -12,6 +12,10 @@
 #include "clk6502.pio.h"
 
 
+#define PIN_IRQB     25
+#define PIN_RESB     26
+#define PIN_NMIB     27
+
 #define OPCODE_NOP   0xEA
 
 #define MAX_REQUESTS 50
@@ -45,13 +49,32 @@ int main() {
  
   stdio_init_all();
 
+	// Initialise the NMIB, RESB and IRQB pins.
+  gpio_init(PIN_NMIB);
+  gpio_init(PIN_RESB);
+  gpio_init(PIN_IRQB);
+
+  // The NMIB, IRQB and RESB pins are always outputs.
+  gpio_set_dir(PIN_NMIB, GPIO_OUT);
+  gpio_set_dir(PIN_IRQB, GPIO_OUT);
+  gpio_set_dir(PIN_RESB, GPIO_OUT);
+
+  // Do not assert /IRQ nor /NMI.
+  gpio_put(PIN_NMIB, 1);
+  gpio_put(PIN_IRQB, 1);
+
+  // Assert /RESET.
+  gpio_put(PIN_RESB, 0);
+
   PIO  pio    = pio0;
   uint offset = pio_add_program(pio, &clk6502_program);
   uint sm     = pio_claim_unused_sm(pio, true);
 
   clk6502_program_init(pio, sm, offset);
 
-  // Take the 6502 out of reset.
+	// Take the 6502 out of reset after at least two cycles (1 ns), so we
+  // wait two.
+  sleep_us(2);
   gpio_put(PIN_RESB, 1);
 
   while (true) {
